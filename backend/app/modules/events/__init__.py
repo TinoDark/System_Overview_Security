@@ -1,0 +1,1 @@
+"""Normalized, persistent, idempotent events."""
