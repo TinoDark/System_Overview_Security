@@ -8,7 +8,15 @@ app/schemas.py
 app/services.py
 app/connectors/__init__.py
 app/connectors/base.py
+app/connectors/clamav.py
+app/connectors/config.py
 app/connectors/fixtures.py
+app/connectors/misp.py
+app/connectors/parsing.py
+app/connectors/registry.py
+app/connectors/rspamd.py
+app/connectors/suricata.py
+app/connectors/wazuh.py
 app/core/__init__.py
 app/core/auth.py
 app/core/config.py
@@ -42,4 +50,5 @@ soc_mvp_backend.egg-info/dependency_links.txt
 soc_mvp_backend.egg-info/requires.txt
 soc_mvp_backend.egg-info/top_level.txt
 tests/test_api.py
+tests/test_connectors.py
 tests/test_scoring.py
