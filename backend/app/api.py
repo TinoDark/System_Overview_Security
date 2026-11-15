@@ -91,6 +91,11 @@ def role_any(*roles: str):
     return require_roles(*roles)
 
 
+READ_INVESTIGATION = ("soc_analyst", "security_admin")
+READ_INCIDENTS = ("soc_analyst", "security_admin", "operator")
+READ_AUDIT = ("auditor", "security_admin")
+
+
 def _event_dict(row: Event):
     return {
         "event_id": str(row.id),
@@ -181,7 +186,7 @@ def organization_detail(
 @router.get("/assets")
 def assets(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,
@@ -204,7 +209,7 @@ def asset_create(
 def asset_detail(
     asset_id: UUID,
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
 ):
     return success(request, serialize(get_resource(db, Asset, asset_id, tenant)))
@@ -225,7 +230,7 @@ def asset_patch(
 @router.get("/integrations")
 def integrations(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,
@@ -238,7 +243,7 @@ def integrations(
 def integration_detail(
     integration_id: UUID,
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
 ):
     return success(
@@ -267,7 +272,7 @@ def integration_create(
 def integration_test(
     integration_id: UUID,
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
 ):
     row = get_resource(db, Integration, integration_id, tenant)
@@ -319,7 +324,7 @@ def mock_fixtures(
 @router.get("/events")
 def events(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,
@@ -340,7 +345,7 @@ def events(
 def event_detail(
     event_id: UUID,
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
 ):
     return success(request, _event_dict(event_details(db, tenant, event_id)))
@@ -349,7 +354,7 @@ def event_detail(
 @router.get("/incidents", response_model=APIEnvelope[list[IncidentDTO]])
 def incidents(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INCIDENTS)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,
@@ -362,7 +367,7 @@ def incidents(
 def incident_detail(
     incident_id: UUID,
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INCIDENTS)),
     db: Session = Depends(default_get_db),
 ):
     return success(request, incident_details(db, tenant, incident_id))
@@ -394,7 +399,7 @@ def incident_comment(
 @router.get("/policies", response_model=APIEnvelope[list[PolicyDTO]])
 def policies(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,
@@ -441,7 +446,7 @@ def response_propose(
 @router.get("/approvals", response_model=APIEnvelope[list[ApprovalDTO]])
 def approvals(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,
@@ -480,7 +485,7 @@ def approval_reject(
 def response_detail(
     response_id: UUID,
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INCIDENTS)),
     db: Session = Depends(default_get_db),
 ):
     return success(request, serialize(get_resource(db, Response, response_id, tenant)))
@@ -517,7 +522,7 @@ def response_execute(
 @router.get("/audit-logs")
 def audit_logs(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_AUDIT)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,

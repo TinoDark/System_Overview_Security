@@ -56,6 +56,29 @@ def test_role_based_access_and_login_catalog(client):
     timeline = client.get("/api/v1/dashboard/timeline", headers=headers)
     assert timeline.status_code == 200
     assert timeline.json()["data"] == []
+    for path in (
+        "/api/v1/incidents",
+        "/api/v1/events",
+        "/api/v1/assets",
+        "/api/v1/integrations",
+        "/api/v1/policies",
+        "/api/v1/approvals",
+        "/api/v1/audit-logs",
+    ):
+        assert client.get(path, headers=headers).status_code == 403
+
+    operator, _ = login(client, "operator-a")
+    assert client.get("/api/v1/incidents", headers=operator).status_code == 200
+    assert client.get("/api/v1/events", headers=operator).status_code == 403
+    assert client.get("/api/v1/audit-logs", headers=operator).status_code == 403
+
+    auditor, _ = login(client, "auditor-a")
+    assert client.get("/api/v1/audit-logs", headers=auditor).status_code == 200
+    assert client.get("/api/v1/incidents", headers=auditor).status_code == 403
+
+    analyst, _ = login(client, "analyst-a")
+    assert client.get("/api/v1/events", headers=analyst).status_code == 200
+    assert client.get("/api/v1/audit-logs", headers=analyst).status_code == 403
 
 
 def test_tenant_header_membership_and_known_uuid_isolation(client):
@@ -126,7 +149,7 @@ def test_known_tenant_b_event_incident_approval_and_response_are_hidden(client):
         ).status_code
         == 404
     )
-    assert client.get("/api/v1/audit-logs", headers=analyst_a).json()["data"] == []
+    assert client.get("/api/v1/audit-logs", headers=analyst_a).status_code == 403
 
 
 def test_database_rejects_cross_tenant_incident_event_links(client):

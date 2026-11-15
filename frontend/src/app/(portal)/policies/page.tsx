@@ -3,11 +3,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
+import { useOrganizationId } from "@/lib/tenant";
 import { DataTable, ErrorState, LoadingState, PageHeading, SeverityBadge, SimulationBadge, StatusBadge } from "@/components/ui";
 import type { Policy } from "@/types/api";
 
 export default function PoliciesPage() {
-  const query = useQuery({ queryKey: ["policies"], queryFn: () => api.policies() });
+  const organizationId = useOrganizationId();
+  const query = useQuery({ queryKey: ["policies", organizationId], queryFn: () => api.policies() });
   const policies = query.data?.data ?? [];
   return <div className="page-stack"><PageHeading title="Politiques" description="Règles de réponse. Elles sont désactivées tant que l’API ne les active pas." actions={<SimulationBadge />} />
     <div className="notice notice-info"><ShieldCheck size={16} />Action autorisée pour l’instant : <code>simulate_containment</code>. Voir une règle ici ne donne pas le droit de l’exécuter.</div>

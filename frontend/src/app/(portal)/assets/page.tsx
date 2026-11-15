@@ -4,12 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { useOrganizationId } from "@/lib/tenant";
 import { DataTable, ErrorState, formatDate, LoadingState, PageHeading, StatusBadge } from "@/components/ui";
 import type { Asset } from "@/types/api";
 
 export default function AssetsPage() {
   const [search, setSearch] = useState("");
-  const query = useQuery({ queryKey: ["assets"], queryFn: () => api.assets() });
+  const organizationId = useOrganizationId();
+  const query = useQuery({ queryKey: ["assets", organizationId], queryFn: () => api.assets() });
   const allAssets = query.data?.data ?? [];
   const assets = allAssets.filter((asset) => `${asset.name} ${asset.hostname ?? ""} ${asset.ip_address ?? ""} ${asset.asset_type}`.toLowerCase().includes(search.toLowerCase()));
   return <div className="page-stack"><PageHeading title="Actifs" description="Hôtes et systèmes de l’organisation." />

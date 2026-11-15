@@ -4,13 +4,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cable, Play, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { useOrganizationId } from "@/lib/tenant";
 import { EmptyState, ErrorNotice, ErrorState, formatDate, LoadingState, PageHeading, SimulationBadge, StatusBadge } from "@/components/ui";
 import type { Integration } from "@/types/api";
 
 export default function IntegrationsPage() {
   const queryClient = useQueryClient();
   const [feedback, setFeedback] = useState("");
-  const integrations = useQuery({ queryKey: ["integrations"], queryFn: () => api.integrations() });
+  const organizationId = useOrganizationId();
+  const integrations = useQuery({ queryKey: ["integrations", organizationId], queryFn: () => api.integrations() });
   const collect = useMutation({ mutationFn: (id: string) => api.collect(id), onSuccess: async (result) => {
     const run = result.data;
     setFeedback(`Collecte ${run.status} · ${run.received} reçus, ${run.inserted} insérés, ${run.duplicates} doublons, ${run.incidents_created} incidents créés.`);

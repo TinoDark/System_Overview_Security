@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { api } from "@/lib/api";
+import { useOrganizationId } from "@/lib/tenant";
 import { DataTable, ErrorState, formatDate, LoadingState, PageHeading, SeverityBadge, StatusBadge } from "@/components/ui";
 import type { Incident, IncidentStatus, Severity } from "@/types/api";
 
@@ -12,8 +13,9 @@ export default function IncidentsPage() {
   const [search, setSearch] = useState("");
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("");
+  const organizationId = useOrganizationId();
   const query = useInfiniteQuery({
-    queryKey: ["incidents", { severity, status }],
+    queryKey: ["incidents", { severity, status }, organizationId],
     queryFn: ({ pageParam }) => api.incidents({ severity: severity || undefined, status: status || undefined, limit: 100, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.meta.next_cursor ?? undefined,

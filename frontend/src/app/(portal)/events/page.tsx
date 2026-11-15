@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Search, X } from "lucide-react";
 import { api } from "@/lib/api";
+import { useOrganizationId } from "@/lib/tenant";
 import { DataTable, ErrorState, formatDate, LoadingState, PageHeading, SeverityBadge, SimulationBadge } from "@/components/ui";
 import type { SecurityEvent, Severity } from "@/types/api";
 
@@ -15,13 +16,14 @@ export default function EventsPage() {
   useEffect(() => {
     setSelectedId(new URLSearchParams(window.location.search).get("event") ?? "");
   }, []);
+  const organizationId = useOrganizationId();
   const events = useInfiniteQuery({
-    queryKey: ["events", { source, severity }],
+    queryKey: ["events", { source, severity }, organizationId],
     queryFn: ({ pageParam }) => api.events({ source: source || undefined, severity: severity || undefined, limit: 100, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.meta.next_cursor ?? undefined,
   });
-  const detail = useQuery({ queryKey: ["event", selectedId], queryFn: () => api.event(selectedId), enabled: Boolean(selectedId) });
+  const detail = useQuery({ queryKey: ["event", selectedId, organizationId], queryFn: () => api.event(selectedId), enabled: Boolean(selectedId) });
   const rows = (events.data?.pages.flatMap((page) => page.data) ?? []).filter((event) => `${event.message} ${event.external_event_id} ${event.event_type} ${event.asset?.hostname ?? ""} ${event.asset?.ip_address ?? ""}`.toLowerCase().includes(search.toLowerCase()));
   return <div className="page-stack">
     <PageHeading title="Événements" description="Événements collectés pour l’organisation active." actions={<SimulationBadge />} />

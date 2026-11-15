@@ -148,8 +148,10 @@ def get_tenant(
 
 
 def require_roles(*roles: str):
+    allowed = set(roles) | {"super_admin"}
+
     def dependency(tenant: TenantContext = Depends(get_tenant)) -> TenantContext:
-        if tenant.role not in roles:
+        if tenant.role not in allowed:
             raise APIError(403, "FORBIDDEN", "Role is not permitted for this operation")
         return tenant
 

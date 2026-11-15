@@ -3,15 +3,22 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, AlertOctagon, Boxes, Radio, ShieldAlert } from "lucide-react";
+import { canOpen } from "@/lib/access";
 import { api } from "@/lib/api";
+import { useOrganizationId, useRole } from "@/lib/tenant";
 import { EmptyState, ErrorState, formatDate, LoadingState, MetricCard, PageHeading, SeverityBadge, SimulationBadge, StatusBadge } from "@/components/ui";
 import type { Incident, Integration } from "@/types/api";
 
 export default function DashboardPage() {
-  const summary = useQuery({ queryKey: ["dashboard", "summary"], queryFn: () => api.summary() });
-  const timeline = useQuery({ queryKey: ["dashboard", "timeline"], queryFn: () => api.timeline() });
-  const incidents = useQuery({ queryKey: ["incidents", "dashboard"], queryFn: () => api.incidents({ limit: 100 }) });
-  const integrations = useQuery({ queryKey: ["integrations"], queryFn: () => api.integrations() });
+  const organizationId = useOrganizationId();
+  const role = useRole();
+  const showIncidents = canOpen(role, "/incidents");
+  const showIntegrations = canOpen(role, "/integrations");
+  const showAssets = canOpen(role, "/assets");
+  const summary = useQuery({ queryKey: ["dashboard", "summary", organizationId], queryFn: () => api.summary() });
+  const timeline = useQuery({ queryKey: ["dashboard", "timeline", organizationId], queryFn: () => api.timeline() });
+  const incidents = useQuery({ queryKey: ["incidents", "dashboard", organizationId], queryFn: () => api.incidents({ limit: 100 }), enabled: showIncidents });
+  const integrations = useQuery({ queryKey: ["integrations", organizationId], queryFn: () => api.integrations(), enabled: showIntegrations });
   const metrics = summary.data?.data;
   const recentTimeline = timeline.data?.data ?? [];
   const topIncidents = (incidents.data?.data ?? []).filter((incident) => incident.status === "new" || incident.status === "in_progress").slice(0, 5);
@@ -36,17 +43,17 @@ export default function DashboardPage() {
             return <div className="timeline-row" key={String(entry.id ?? `${label}-${index}`)}><span className="timeline-point" /><div className="timeline-row-copy"><strong>{label}</strong><span>{time ? formatDate(String(time)) : "Période agrégée"}</span></div><span className="timeline-count">{typeof count === "number" ? count : "—"}</span></div>;
           })}</div> : <EmptyState title="Aucune activité" description="La timeline sera renseignée à partir des événements du tenant." />}
       </section>
-      <section className="panel"><div className="panel-heading"><h2>Incidents ouverts</h2><Link href="/incidents" className="text-link">Tout voir</Link></div>
+      {showIncidents && <section className="panel"><div className="panel-heading"><h2>Incidents ouverts</h2><Link href="/incidents" className="text-link">Tout voir</Link></div>
         {incidents.isLoading ? <LoadingState /> : incidents.isError ? <ErrorState error={incidents.error} onRetry={() => void incidents.refetch()} /> : topIncidents.length ?
           <div className="priority-list">{topIncidents.slice(0, 5).map((incident: Incident) => <Link className="priority-item" href={`/incidents/${incident.id}`} key={incident.id}>
             <div className="priority-mark"><AlertOctagon size={16} /></div><div className="priority-copy"><strong>{incident.title}</strong><span>{incident.risk_score} risk score · {formatDate(incident.created_at)}</span></div><SeverityBadge severity={incident.severity} />
           </Link>)}</div> : <EmptyState title="Aucun incident ouvert" description="Le backend ne signale aucun incident à traiter." />}
-      </section>
-      <section className="panel connector-panel"><div className="panel-heading"><h2>Connecteurs</h2><Link href="/integrations" className="text-link">Gérer</Link></div>
+      </section>}
+      {showIntegrations && <section className="panel connector-panel"><div className="panel-heading"><h2>Connecteurs</h2><Link href="/integrations" className="text-link">Gérer</Link></div>
         {integrations.isLoading ? <LoadingState /> : integrations.isError ? <ErrorState error={integrations.error} onRetry={() => void integrations.refetch()} /> : connectors.length ?
           <div className="connector-list">{connectors.slice(0, 4).map((connector: Integration) => <div className="connector-item" key={connector.id}><div className="connector-symbol"><Boxes size={16} /></div><div className="connector-copy"><strong>{connector.name}</strong><span>{connector.provider ?? connector.type ?? "Mock provider"}</span></div><StatusBadge value={connector.status ?? (connector.enabled ? "active" : "inactive")} /><SimulationBadge subtle /></div>)}</div> : <EmptyState title="Aucun connecteur configuré" description="Les intégrations présentes seront chargées depuis l’API." />}
-      </section>
-      <section className="panel posture-panel"><h2>Actifs surveillés</h2><div className="posture-value">{metrics?.total_assets ?? "—"}<span> actifs</span></div><p>Inventaire provenant du tenant actif.</p><Link className="text-link" href="/assets">Ouvrir l’inventaire</Link></section>
+      </section>}
+      {showAssets && <section className="panel posture-panel"><h2>Actifs surveillés</h2><div className="posture-value">{metrics?.total_assets ?? "—"}<span> actifs</span></div><p>Inventaire provenant du tenant actif.</p><Link className="text-link" href="/assets">Ouvrir l’inventaire</Link></section>}
     </div>
   </div>;
 }

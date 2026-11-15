@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, X } from "lucide-react";
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { useOrganizationId } from "@/lib/tenant";
 import { DataTable, ErrorNotice, ErrorState, formatDate, LoadingState, PageHeading, SimulationBadge, StatusBadge } from "@/components/ui";
 import type { Approval } from "@/types/api";
 
@@ -11,7 +12,8 @@ export default function ApprovalsPage() {
   const client = useQueryClient();
   const [justifications, setJustifications] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState("");
-  const approvals = useQuery({ queryKey: ["approvals"], queryFn: () => api.approvals() });
+  const organizationId = useOrganizationId();
+  const approvals = useQuery({ queryKey: ["approvals", organizationId], queryFn: () => api.approvals() });
   const decision = useMutation({
     mutationFn: ({ id, choice, justification }: { id: string; choice: "approve" | "reject"; justification: string }) => api.decideApproval(id, choice, justification),
     onSuccess: async (_data, variables) => {
