@@ -80,15 +80,15 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     router.replace("/login");
   }
 
-  const nav = <><div className="brand"><div className="brand-mark"><Shield size={20} /></div><div><strong>NORTHSTAR</strong><span>SECURITY OPERATIONS</span></div></div>
-    <div className="side-label">ESPACE DE TRAVAIL</div>
+  const nav = <><div className="brand"><div className="brand-mark"><Shield size={16} /></div><div><strong>Northstar</strong><span>Console SOC</span></div></div>
+    <div className="side-label">Navigation</div>
     <nav className="side-nav">{navigation.map((item) => {
       const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
       const Icon = item.icon;
       return <Link key={item.href} href={item.href} className={`nav-link${active ? " active" : ""}`} onClick={() => setMobileOpen(false)}>
-        <Icon size={17} strokeWidth={1.8} /><span>{item.label}</span>{item.href === "/incidents" && <span className="nav-indicator" />}
+        <Icon size={16} strokeWidth={1.75} /><span>{item.label}</span>
       </Link>;
-    })}</nav><div className="sidebar-bottom"><SimulationBadge /><div className="system-status"><span className="source-dot" /> Données servies par FastAPI</div></div></>;
+    })}</nav><div className="sidebar-bottom"><SimulationBadge /></div></>;
 
   return <div className="portal-layout">
     <aside className="sidebar">{nav}</aside>
@@ -96,7 +96,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     <aside className={`mobile-sidebar${mobileOpen ? " open" : ""}`}><button className="mobile-close" onClick={() => setMobileOpen(false)} aria-label="Fermer le menu"><X size={20} /></button>{nav}</aside>
     <div className="main-column">
       <header className="topbar"><button className="mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Ouvrir le menu"><Menu size={20} /></button>
-        <div className="topbar-context"><span className="live-dot" /> SOC CONSOLE <span className="breadcrumb-divider">/</span> {navigation.find((item) => pathname.startsWith(item.href))?.label ?? "Portail"}</div>
+        <div className="topbar-context">{navigation.find((item) => pathname.startsWith(item.href))?.label ?? "Portail"}</div>
         <div className="topbar-actions"><div className="org-select-wrap"><Network size={15} />
           <select aria-label="Organisation active" value={organizationId ?? ""} onChange={(event) => chooseOrganization(event.target.value)}>
             <option value="" disabled>{memberships.length ? "Choisir l’organisation" : "Aucune organisation"}</option>
@@ -108,7 +108,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
       </header>
       {!activeMembership && <div className="tenant-banner"><AlertTriangle size={17} />{memberships.length ? "Sélectionnez une organisation pour accéder aux données." : "Aucune organisation disponible pour ce compte."}</div>}
       <main className="main-content">{activeMembership ? children : <section className="tenant-empty"><div className="empty-icon"><Search size={22} /></div><h2>Organisation requise</h2><p>Choisissez un tenant autorisé dans la barre supérieure. Chaque appel métier transmettra explicitement son identifiant à l’API.</p></section>}</main>
-      <footer className="footer"><span>Northstar SOC · Prototype</span><span>Données et autorisations fournies par le backend FastAPI</span></footer>
+      <footer className="footer"><span>Northstar · démonstration</span><span>Les actions restent soumises au backend</span></footer>
     </div>
   </div>;
 }

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 Role = Literal["super_admin", "security_admin", "soc_analyst", "operator", "auditor", "observer"]
 Severity = Literal["info", "low", "medium", "high", "critical"]
-Source = Literal["wazuh", "rspamd", "clamav", "misp"]
+Source = Literal["wazuh", "suricata", "rspamd", "clamav", "misp"]
 
 
 class StrictDTO(BaseModel):
@@ -83,7 +83,7 @@ class NormalizedEventDTO(BaseModel):
     indicators: list[IndicatorDTO]
     raw_event: dict[str, Any]
     schema_version: Literal["1.0"] = "1.0"
-    is_simulated: Literal[True] = True
+    is_simulated: bool = False
 
     @field_validator("occurred_at", "observed_at")
     @classmethod
@@ -122,7 +122,17 @@ class AssetPatch(StrictDTO):
 
 class IntegrationCreate(StrictDTO):
     name: str = Field(min_length=1, max_length=150)
-    integration_type: Literal["mock_wazuh", "mock_rspamd", "mock_clamav", "mock_misp"]
+    integration_type: Literal[
+        "mock_wazuh",
+        "mock_rspamd",
+        "mock_clamav",
+        "mock_misp",
+        "wazuh",
+        "suricata",
+        "rspamd",
+        "clamav",
+        "misp",
+    ]
     configuration: dict[str, Any] = Field(default_factory=dict)
 
 

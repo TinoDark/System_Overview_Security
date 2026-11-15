@@ -4,7 +4,7 @@ from typing import Any
 
 from app.connectors.base import MockConnector
 
-FIXTURE_TIME = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
+FIXTURE_TIME = datetime.now(UTC).replace(microsecond=0)
 
 # All values are synthetic/reserved. These objects are static and never make network calls.
 CATALOG: dict[str, list[dict[str, Any]]] = {

@@ -3,10 +3,15 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
+from app.connectors.base import ConnectorError
+from app.connectors.config import validate_connector_config
 from app.connectors.fixtures import CONNECTORS
+from app.connectors.registry import SOURCES, build_connector
 from app.core.auth import MOCK_CATALOG, TenantContext, issue_token, permissions_for_role
 from app.core.errors import APIError
 from app.db.models import (
@@ -230,20 +235,32 @@ def get_resource(db: Session, model, resource_id: UUID, tenant: TenantContext):
     return row
 
 
+def _connector_error(exc: ConnectorError) -> APIError:
+    status = 503 if exc.code == "CONNECTOR_UNAVAILABLE" else 422
+    return APIError(status, exc.code, exc.message)
+
+
 def create_integration(
     db: Session, tenant: TenantContext, name: str, provider: str, configuration: dict
 ):
-    # Fixture providers are not configurable by URL, secret, or other runtime option.
-    if configuration:
-        raise APIError(
-            422, "INVALID_CONFIGURATION", "Fixture-only integrations accept no configuration"
-        )
+    if provider.startswith("mock_"):
+        if configuration:
+            raise APIError(
+                422, "INVALID_CONFIGURATION", "Fixture-only integrations accept no configuration"
+            )
+        if provider.removeprefix("mock_") not in CONNECTORS:
+            raise APIError(422, "UNSUPPORTED_CONNECTOR", "Only known connectors are supported")
+    else:
+        try:
+            configuration = validate_connector_config(provider, configuration)
+        except ConnectorError as exc:
+            raise _connector_error(exc) from exc
     row = Integration(
         id=uuid4(),
         organization_id=tenant.organization_id,
         name=name,
         integration_type=provider,
-        configuration=configuration,
+        configuration=configuration or {},
         status="active",
     )
     db.add(row)
@@ -315,23 +332,32 @@ def collect_integration(
     integration = get_resource(db, Integration, integration_id, tenant)
     if integration.status != "active":
         raise APIError(409, "INTEGRATION_DISABLED", "Integration is not active")
-    provider = integration.integration_type.removeprefix("mock_")
-    connector = CONNECTORS.get(provider)
-    if connector is None:
-        raise APIError(422, "UNSUPPORTED_CONNECTOR", "Only fixture connectors are supported")
-    batch = connector.collect(limit=min(limit, 100))
-    received, inserted, duplicates, incidents_created = len(batch["items"]), 0, 0, 0
-    for raw in batch["items"]:
-        normalized = connector.normalize(raw)
-        connector.validate(normalized)
-        normalized.update(
-            {
-                "event_id": uuid4(),
-                "organization_id": tenant.organization_id,
-                "integration_id": integration.id,
-            }
+    try:
+        connector = build_connector(integration.integration_type, integration.configuration)
+        stored_cursor = (integration.configuration or {}).get("cursor")
+        batch = connector.collect(
+            cursor=str(stored_cursor) if stored_cursor else None,
+            limit=min(limit, 100),
         )
-        dto = NormalizedEventDTO.model_validate(normalized)
+    except ConnectorError as exc:
+        raise _connector_error(exc) from exc
+    simulated = connector.simulated
+    received, inserted, duplicates, incidents_created, rejected = len(batch["items"]), 0, 0, 0, 0
+    for raw in batch["items"]:
+        try:
+            normalized = connector.normalize(raw)
+            connector.validate(normalized)
+            normalized.update(
+                {
+                    "event_id": uuid4(),
+                    "organization_id": tenant.organization_id,
+                    "integration_id": integration.id,
+                }
+            )
+            dto = NormalizedEventDTO.model_validate(normalized)
+        except (ValueError, KeyError, ValidationError):
+            rejected += 1
+            continue
         scope = event_scope(dto.model_dump(mode="json"))
         base = SEVERITY_SCORE[dto.severity]
         score = min(100, base)
@@ -346,7 +372,7 @@ def collect_integration(
             id=dto.event_id,
             organization_id=tenant.organization_id,
             integration_id=integration.id,
-            source=provider,
+            source=connector.provider,
             external_event_id=dto.external_event_id,
             event_type=dto.event_type,
             occurred_at=dto.occurred_at,
@@ -358,7 +384,7 @@ def collect_integration(
             indicators=[item.model_dump() for item in dto.indicators],
             raw_event=dto.raw_event,
             risk_factors=factors,
-            is_simulated=True,
+            is_simulated=simulated,
         )
         stored_event = event_repository.insert_if_new(db, event)
         if stored_event is None:
@@ -463,9 +489,15 @@ def collect_integration(
             "received": received,
             "inserted": inserted,
             "duplicates": duplicates,
-            "is_simulated": True,
+            "rejected": rejected,
+            "is_simulated": simulated,
         },
     )
+    if batch.get("next_cursor"):
+        configuration = dict(integration.configuration or {})
+        configuration["cursor"] = batch["next_cursor"]
+        integration.configuration = configuration
+        flag_modified(integration, "configuration")
     db.commit()
     return {
         "run_id": str(uuid4()),
@@ -473,8 +505,9 @@ def collect_integration(
         "received": received,
         "inserted": inserted,
         "duplicates": duplicates,
+        "rejected": rejected,
         "incidents_created": incidents_created,
-        "is_simulated": True,
+        "is_simulated": simulated,
     }
 
 
@@ -664,7 +697,7 @@ def search_events(
         raise APIError(422, "INVALID_CURSOR", "Cursor is invalid") from exc
     if offset < 0:
         raise APIError(422, "INVALID_CURSOR", "Cursor is invalid")
-    if source and source not in CONNECTORS:
+    if source and source not in SOURCES:
         raise APIError(422, "INVALID_SOURCE", "Unsupported event source")
     if from_time and to_time and from_time > to_time:
         raise APIError(422, "INVALID_TIME_RANGE", "from must be earlier than or equal to to")

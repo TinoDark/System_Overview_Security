@@ -7,7 +7,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.connectors.base import ConnectorError
+from app.connectors.config import public_configuration
 from app.connectors.fixtures import CONNECTORS, RESOURCE_FOR_PROVIDER
+from app.connectors.registry import build_connector
 from app.core.auth import (
     Principal,
     TenantContext,
@@ -111,7 +114,11 @@ def _event_dict(row: Event):
 
 
 def _integration_dict(values: dict) -> dict:
-    return {**values, "is_simulated": True}
+    configuration = values.get("configuration")
+    if isinstance(configuration, dict):
+        values = {**values, "configuration": public_configuration(configuration)}
+    simulated = str(values.get("integration_type", "")).startswith("mock_")
+    return {**values, "is_simulated": simulated}
 
 
 @router.post("/auth/mock-login")
@@ -264,11 +271,12 @@ def integration_test(
     db: Session = Depends(default_get_db),
 ):
     row = get_resource(db, Integration, integration_id, tenant)
-    provider = row.integration_type.removeprefix("mock_")
-    connector = CONNECTORS.get(provider)
-    if not connector:
-        raise APIError(422, "UNSUPPORTED_CONNECTOR", "Only fixture connectors are supported")
-    return success(request, connector.health_check())
+    try:
+        connector = build_connector(row.integration_type, row.configuration)
+        return success(request, connector.health_check())
+    except ConnectorError as exc:
+        status = 503 if exc.code == "CONNECTOR_UNAVAILABLE" else 422
+        raise APIError(status, exc.code, exc.message) from exc
 
 
 @router.post("/integrations/{integration_id}/collect")

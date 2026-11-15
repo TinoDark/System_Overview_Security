@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ClipboardCheck, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { DataTable, ErrorNotice, ErrorState, formatDate, LoadingState, PageHeading, SimulationBadge, StatusBadge } from "@/components/ui";
@@ -21,11 +21,11 @@ export default function ApprovalsPage() {
     },
   });
   const rows = approvals.data?.data ?? [];
-  return <div className="page-stack"><PageHeading eyebrow="SÉPARATION DES RÔLES" title="Approbations" description="Examinez les demandes en attente et transmettez une décision justifiée." actions={<SimulationBadge />} />
-    <div className="notice notice-info"><ClipboardCheck size={17} />Le backend valide le rôle, l’expiration et la séparation demandeur/décideur. L’interface ne fait qu’exposer le parcours.</div>
+  return <div className="page-stack"><PageHeading title="Approbations" description="Demandes en attente. La décision est enregistrée par l’API." actions={<SimulationBadge />} />
+    <div className="notice notice-info">Le backend vérifie le rôle, l’expiration et que le demandeur n’est pas le décideur.</div>
     {feedback && <div className="notice notice-success"><Check size={16} />{feedback}<button className="notice-dismiss" onClick={() => setFeedback("")}>×</button></div>}
     {decision.isError && <ErrorNotice>{decision.error.message}</ErrorNotice>}
-    <section className="panel table-panel"><div className="panel-heading"><div><div className="eyebrow">DEMANDES DE RÉPONSE</div><h2>File d’approbation</h2></div></div>
+    <section className="panel table-panel"><div className="panel-heading"><h2>Demandes</h2></div>
       {approvals.isLoading ? <LoadingState /> : approvals.isError ? <ErrorState error={approvals.error} onRetry={() => void approvals.refetch()} /> :
         <DataTable headers={["Incident", "Demandeur", "Statut", "Expire le", "Justification / décision"]} empty={!rows.length}>{rows.map((approval: Approval) => <ApprovalRow key={approval.id} approval={approval}
           justification={justifications[approval.id] ?? ""} onChange={(value) => setJustifications((current) => ({ ...current, [approval.id]: value }))}
