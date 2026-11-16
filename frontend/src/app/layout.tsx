@@ -3,8 +3,8 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Northstar SOC | Security Operations",
-  description: "Portail SOC de démonstration — données servies par l'API FastAPI.",
+  title: "Northstar",
+  description: "Console de supervision et de réponse aux incidents.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 Role = Literal["super_admin", "security_admin", "soc_analyst", "operator", "auditor", "observer"]
 Severity = Literal["info", "low", "medium", "high", "critical"]
-Source = Literal["wazuh", "rspamd", "clamav", "misp"]
+Source = Literal["wazuh", "suricata", "rspamd", "clamav", "misp"]
 
 
 class StrictDTO(BaseModel):
@@ -32,6 +32,57 @@ class PrincipalDTO(BaseModel):
     display_name: str
     memberships: list[MembershipDTO]
     permissions: list[str] = Field(default_factory=list)
+
+
+class MembershipAssignment(StrictDTO):
+    organization_id: UUID
+    role: Role
+
+
+class MemberCreate(StrictDTO):
+    user_key: str = Field(min_length=1, max_length=100)
+    display_name: str = Field(min_length=1, max_length=200)
+    memberships: list[MembershipAssignment] = Field(min_length=1, max_length=20)
+
+    @field_validator("user_key")
+    @classmethod
+    def normalize_user_key(cls, value: str) -> str:
+        key = value.strip().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,99}", key):
+            raise ValueError("user_key must start with a letter or digit and use lowercase letters, digits, ., _ or -")
+        return key
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise ValueError("display_name is required")
+        return name
+
+    @model_validator(mode="after")
+    def unique_organizations(self):
+        organization_ids = [item.organization_id for item in self.memberships]
+        if len(set(organization_ids)) != len(organization_ids):
+            raise ValueError("each organization can be assigned only once")
+        return self
+
+
+class MemberRoleUpdate(StrictDTO):
+    organization_id: UUID
+    role: Role
+
+
+class OrganizationCreate(StrictDTO):
+    name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise ValueError("name is required")
+        return name
 
 
 class IndicatorDTO(BaseModel):
@@ -83,7 +134,7 @@ class NormalizedEventDTO(BaseModel):
     indicators: list[IndicatorDTO]
     raw_event: dict[str, Any]
     schema_version: Literal["1.0"] = "1.0"
-    is_simulated: Literal[True] = True
+    is_simulated: bool = False
 
     @field_validator("occurred_at", "observed_at")
     @classmethod
@@ -122,7 +173,17 @@ class AssetPatch(StrictDTO):
 
 class IntegrationCreate(StrictDTO):
     name: str = Field(min_length=1, max_length=150)
-    integration_type: Literal["mock_wazuh", "mock_rspamd", "mock_clamav", "mock_misp"]
+    integration_type: Literal[
+        "mock_wazuh",
+        "mock_rspamd",
+        "mock_clamav",
+        "mock_misp",
+        "wazuh",
+        "suricata",
+        "rspamd",
+        "clamav",
+        "misp",
+    ]
     configuration: dict[str, Any] = Field(default_factory=dict)
 
 

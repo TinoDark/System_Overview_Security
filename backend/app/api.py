@@ -7,7 +7,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.connectors.base import ConnectorError
+from app.connectors.config import public_configuration
 from app.connectors.fixtures import CONNECTORS, RESOURCE_FOR_PROVIDER
+from app.connectors.registry import build_connector
 from app.core.auth import (
     Principal,
     TenantContext,
@@ -38,6 +41,9 @@ from app.schemas import (
     IncidentDTO,
     IncidentStatusChange,
     IntegrationCreate,
+    MemberCreate,
+    MemberRoleUpdate,
+    OrganizationCreate,
     MockLogin,
     PolicyCreate,
     PolicyDTO,
@@ -51,6 +57,9 @@ from app.services import (
     collect_integration,
     create_asset,
     create_integration,
+    change_member_role,
+    create_member,
+    create_organization,
     create_policy,
     decide_approval,
     dry_run_response,
@@ -58,13 +67,14 @@ from app.services import (
     execute_response,
     get_resource,
     incident_details,
+    list_members,
+    list_organizations,
     list_rows,
     login_demo_user,
     organization_details,
     propose_response,
     search_events,
     serialize,
-    tenant_organizations,
     update_asset,
     update_policy,
 )
@@ -86,6 +96,11 @@ def success(request: Request, data, **meta):
 
 def role_any(*roles: str):
     return require_roles(*roles)
+
+
+READ_INVESTIGATION = ("soc_analyst", "security_admin")
+READ_INCIDENTS = ("soc_analyst", "security_admin", "operator")
+READ_AUDIT = ("auditor", "security_admin")
 
 
 def _event_dict(row: Event):
@@ -111,7 +126,11 @@ def _event_dict(row: Event):
 
 
 def _integration_dict(values: dict) -> dict:
-    return {**values, "is_simulated": True}
+    configuration = values.get("configuration")
+    if isinstance(configuration, dict):
+        values = {**values, "configuration": public_configuration(configuration)}
+    simulated = str(values.get("integration_type", "")).startswith("mock_")
+    return {**values, "is_simulated": simulated}
 
 
 @router.post("/auth/mock-login")
@@ -158,7 +177,17 @@ def organizations(
     principal: Principal = Depends(get_principal),
     db: Session = Depends(default_get_db),
 ):
-    return success(request, [serialize(row) for row in tenant_organizations(db, principal.id)])
+    return success(request, [serialize(row) for row in list_organizations(db, principal)])
+
+
+@router.post("/organizations", status_code=201)
+def organization_create(
+    body: OrganizationCreate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: Session = Depends(default_get_db),
+):
+    return success(request, serialize(create_organization(db, principal, body.name)))
 
 
 @router.get("/organizations/{organization_id}")
@@ -171,10 +200,40 @@ def organization_detail(
     return success(request, serialize(organization_details(db, principal.id, organization_id)))
 
 
+@router.get("/members")
+def members(
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: Session = Depends(default_get_db),
+):
+    return success(request, list_members(db, principal))
+
+
+@router.post("/members", status_code=201)
+def member_create(
+    body: MemberCreate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: Session = Depends(default_get_db),
+):
+    return success(request, create_member(db, principal, body))
+
+
+@router.patch("/members/{user_id}")
+def member_role(
+    user_id: UUID,
+    body: MemberRoleUpdate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: Session = Depends(default_get_db),
+):
+    return success(request, change_member_role(db, principal, user_id, body))
+
+
 @router.get("/assets")
 def assets(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,
@@ -197,7 +256,7 @@ def asset_create(
 def asset_detail(
     asset_id: UUID,
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
 ):
     return success(request, serialize(get_resource(db, Asset, asset_id, tenant)))
@@ -218,7 +277,7 @@ def asset_patch(
 @router.get("/integrations")
 def integrations(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,
@@ -231,7 +290,7 @@ def integrations(
 def integration_detail(
     integration_id: UUID,
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
 ):
     return success(
@@ -260,15 +319,16 @@ def integration_create(
 def integration_test(
     integration_id: UUID,
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
 ):
     row = get_resource(db, Integration, integration_id, tenant)
-    provider = row.integration_type.removeprefix("mock_")
-    connector = CONNECTORS.get(provider)
-    if not connector:
-        raise APIError(422, "UNSUPPORTED_CONNECTOR", "Only fixture connectors are supported")
-    return success(request, connector.health_check())
+    try:
+        connector = build_connector(row.integration_type, row.configuration)
+        return success(request, connector.health_check())
+    except ConnectorError as exc:
+        status = 503 if exc.code == "CONNECTOR_UNAVAILABLE" else 422
+        raise APIError(status, exc.code, exc.message) from exc
 
 
 @router.post("/integrations/{integration_id}/collect")
@@ -311,7 +371,7 @@ def mock_fixtures(
 @router.get("/events")
 def events(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,
@@ -332,7 +392,7 @@ def events(
 def event_detail(
     event_id: UUID,
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
 ):
     return success(request, _event_dict(event_details(db, tenant, event_id)))
@@ -341,7 +401,7 @@ def event_detail(
 @router.get("/incidents", response_model=APIEnvelope[list[IncidentDTO]])
 def incidents(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INCIDENTS)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,
@@ -354,7 +414,7 @@ def incidents(
 def incident_detail(
     incident_id: UUID,
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INCIDENTS)),
     db: Session = Depends(default_get_db),
 ):
     return success(request, incident_details(db, tenant, incident_id))
@@ -386,7 +446,7 @@ def incident_comment(
 @router.get("/policies", response_model=APIEnvelope[list[PolicyDTO]])
 def policies(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,
@@ -433,7 +493,7 @@ def response_propose(
 @router.get("/approvals", response_model=APIEnvelope[list[ApprovalDTO]])
 def approvals(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INVESTIGATION)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,
@@ -472,7 +532,7 @@ def approval_reject(
 def response_detail(
     response_id: UUID,
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_INCIDENTS)),
     db: Session = Depends(default_get_db),
 ):
     return success(request, serialize(get_resource(db, Response, response_id, tenant)))
@@ -509,7 +569,7 @@ def response_execute(
 @router.get("/audit-logs")
 def audit_logs(
     request: Request,
-    tenant: TenantContext = Depends(get_tenant),
+    tenant: TenantContext = Depends(role_any(*READ_AUDIT)),
     db: Session = Depends(default_get_db),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = None,

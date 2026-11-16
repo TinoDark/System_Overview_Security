@@ -7,7 +7,12 @@ class Settings(BaseSettings):
     mock_auth_enabled: bool = True
     responses_enabled: bool = False
     api_prefix: str = "/api/v1"
-    cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3456",
+        "http://127.0.0.1:3456",
+    ]
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -56,6 +56,29 @@ def test_role_based_access_and_login_catalog(client):
     timeline = client.get("/api/v1/dashboard/timeline", headers=headers)
     assert timeline.status_code == 200
     assert timeline.json()["data"] == []
+    for path in (
+        "/api/v1/incidents",
+        "/api/v1/events",
+        "/api/v1/assets",
+        "/api/v1/integrations",
+        "/api/v1/policies",
+        "/api/v1/approvals",
+        "/api/v1/audit-logs",
+    ):
+        assert client.get(path, headers=headers).status_code == 403
+
+    operator, _ = login(client, "operator-a")
+    assert client.get("/api/v1/incidents", headers=operator).status_code == 200
+    assert client.get("/api/v1/events", headers=operator).status_code == 403
+    assert client.get("/api/v1/audit-logs", headers=operator).status_code == 403
+
+    auditor, _ = login(client, "auditor-a")
+    assert client.get("/api/v1/audit-logs", headers=auditor).status_code == 200
+    assert client.get("/api/v1/incidents", headers=auditor).status_code == 403
+
+    analyst, _ = login(client, "analyst-a")
+    assert client.get("/api/v1/events", headers=analyst).status_code == 200
+    assert client.get("/api/v1/audit-logs", headers=analyst).status_code == 403
 
 
 def test_tenant_header_membership_and_known_uuid_isolation(client):
@@ -126,7 +149,7 @@ def test_known_tenant_b_event_incident_approval_and_response_are_hidden(client):
         ).status_code
         == 404
     )
-    assert client.get("/api/v1/audit-logs", headers=analyst_a).json()["data"] == []
+    assert client.get("/api/v1/audit-logs", headers=analyst_a).status_code == 403
 
 
 def test_database_rejects_cross_tenant_incident_event_links(client):
@@ -346,3 +369,231 @@ def test_expired_approval_cannot_be_decided(client):
     )
     assert result.status_code == 409
     assert result.json()["error"]["code"] == "APPROVAL_EXPIRED"
+
+
+def test_admin_creates_member_only_inside_administered_organizations(client):
+    from tests.conftest import login
+
+    analyst, _ = login(client, "analyst-a")
+    assert client.get("/api/v1/members", headers=analyst).status_code == 403
+    denied = client.post(
+        "/api/v1/members",
+        headers=analyst,
+        json={
+            "user_key": "new-analyst",
+            "display_name": "New Analyst",
+            "memberships": [{"organization_id": ORG_A, "role": "soc_analyst"}],
+        },
+    )
+    assert denied.status_code == 403
+
+    admin, _ = login(client, "admin-a")
+    cross_tenant = client.post(
+        "/api/v1/members",
+        headers=admin,
+        json={
+            "user_key": "cross-tenant",
+            "display_name": "Cross Tenant",
+            "memberships": [{"organization_id": ORG_B, "role": "observer"}],
+        },
+    )
+    assert cross_tenant.status_code == 403
+    elevated = client.post(
+        "/api/v1/members",
+        headers=admin,
+        json={
+            "user_key": "elevated-admin",
+            "display_name": "Elevated",
+            "memberships": [{"organization_id": ORG_A, "role": "super_admin"}],
+        },
+    )
+    assert elevated.status_code == 403
+
+    created = client.post(
+        "/api/v1/members",
+        headers=admin,
+        json={
+            "user_key": "Nina.Analyst",
+            "display_name": " Nina Analyst ",
+            "memberships": [{"organization_id": ORG_A, "role": "soc_analyst"}],
+        },
+    )
+    assert created.status_code == 201
+    body = created.json()["data"]
+    assert body["user_key"] == "nina.analyst"
+    assert body["display_name"] == "Nina Analyst"
+    assert body["memberships"] == [
+        {
+            "organization_id": ORG_A,
+            "organization_name": "Demo Organization A",
+            "role": "soc_analyst",
+        }
+    ]
+    listed = client.get("/api/v1/members", headers=admin).json()["data"]
+    assert any(row["user_id"] == body["user_id"] for row in listed)
+    assert all(row["user_key"] != "super-admin" for row in listed)
+    assert all(
+        membership["role"] != "super_admin"
+        for row in listed
+        for membership in row["memberships"]
+    )
+    admin_b, _ = login(client, "admin-b")
+    hidden = client.get("/api/v1/members", headers=admin_b).json()["data"]
+    assert all(row["user_id"] != body["user_id"] for row in hidden)
+
+    duplicate = client.post(
+        "/api/v1/members",
+        headers=admin,
+        json={
+            "user_key": body["user_key"],
+            "display_name": "Again",
+            "memberships": [{"organization_id": ORG_A, "role": "observer"}],
+        },
+    )
+    assert duplicate.status_code == 409
+
+    session = client.post("/api/v1/auth/mock-login", json={"user_key": body["user_key"]})
+    assert session.status_code == 200
+    assert session.json()["data"]["principal"]["memberships"][0]["organization_id"] == ORG_A
+
+
+def test_super_admin_assigns_one_user_to_several_organizations(client):
+    from tests.conftest import login
+
+    headers, _ = login(client, "super-admin")
+    created = client.post(
+        "/api/v1/members",
+        headers=headers,
+        json={
+            "user_key": "shared-operator",
+            "display_name": "Shared Operator",
+            "memberships": [
+                {"organization_id": ORG_A, "role": "operator"},
+                {"organization_id": ORG_B, "role": "auditor"},
+            ],
+        },
+    )
+    assert created.status_code == 201
+    roles = {
+        item["organization_id"]: item["role"] for item in created.json()["data"]["memberships"]
+    }
+    assert roles == {ORG_A: "operator", ORG_B: "auditor"}
+    listed = client.get("/api/v1/members", headers=headers).json()["data"]
+    row = next(item for item in listed if item["user_key"] == "shared-operator")
+    assert {item["organization_id"] for item in row["memberships"]} == {ORG_A, ORG_B}
+    platform = client.get("/api/v1/members", headers=headers).json()["data"]
+    assert any(item["user_key"] == "super-admin" for item in platform)
+
+
+def test_role_ladder_hides_super_admin_and_replaces_role_on_promotion(client):
+    from tests.conftest import login
+
+    admin, _ = login(client, "admin-a")
+    created = client.post(
+        "/api/v1/members",
+        headers=admin,
+        json={
+            "user_key": "watcher",
+            "display_name": "Watcher",
+            "memberships": [{"organization_id": ORG_A, "role": "observer"}],
+        },
+    )
+    assert created.status_code == 201
+    user_id = created.json()["data"]["user_id"]
+    same_rank = client.post(
+        "/api/v1/members",
+        headers=admin,
+        json={
+            "user_key": "second-admin",
+            "display_name": "Second Admin",
+            "memberships": [{"organization_id": ORG_A, "role": "security_admin"}],
+        },
+    )
+    assert same_rank.status_code == 201
+
+    promoted = client.patch(
+        f"/api/v1/members/{user_id}",
+        headers=admin,
+        json={"organization_id": ORG_A, "role": "operator"},
+    )
+    assert promoted.status_code == 200
+    assert promoted.json()["data"]["memberships"] == [
+        {
+            "organization_id": ORG_A,
+            "organization_name": "Demo Organization A",
+            "role": "operator",
+        }
+    ]
+    above = client.patch(
+        f"/api/v1/members/{user_id}",
+        headers=admin,
+        json={"organization_id": ORG_A, "role": "super_admin"},
+    )
+    assert above.status_code == 403
+    hidden = client.patch(
+        "/api/v1/members/90000000-0000-4000-8000-000000000001",
+        headers=admin,
+        json={"organization_id": ORG_A, "role": "observer"},
+    )
+    assert hidden.status_code == 404
+    own = client.patch(
+        "/api/v1/members/10000000-0000-4000-8000-000000000002",
+        headers=admin,
+        json={"organization_id": ORG_A, "role": "observer"},
+    )
+    assert own.status_code == 403
+
+    super_headers, _ = login(client, "super-admin")
+    peer = client.post(
+        "/api/v1/members",
+        headers=super_headers,
+        json={
+            "user_key": "peer-super",
+            "display_name": "Peer Super",
+            "memberships": [{"organization_id": ORG_A, "role": "super_admin"}],
+        },
+    )
+    assert peer.status_code == 201
+    visible_to_admin = client.get("/api/v1/members", headers=admin).json()["data"]
+    assert all(row["user_key"] != "peer-super" for row in visible_to_admin)
+    visible_to_super = client.get("/api/v1/members", headers=super_headers).json()["data"]
+    assert any(row["user_key"] == "peer-super" for row in visible_to_super)
+    locked = client.patch(
+        f"/api/v1/members/{peer.json()['data']['user_id']}",
+        headers=super_headers,
+        json={"organization_id": ORG_A, "role": "operator"},
+    )
+    assert locked.status_code == 403
+
+
+def test_super_admin_creates_organization_and_admin_cannot(client):
+    from tests.conftest import login
+
+    admin, _ = login(client, "admin-a")
+    denied = client.post("/api/v1/organizations", headers=admin, json={"name": "Organisation C"})
+    assert denied.status_code == 403
+
+    headers, _ = login(client, "super-admin")
+    created = client.post("/api/v1/organizations", headers=headers, json={"name": " Organisation C "})
+    assert created.status_code == 201
+    organization = created.json()["data"]
+    assert organization["name"] == "Organisation C"
+    assert organization["slug"] == "organisation-c"
+    listed = client.get("/api/v1/organizations", headers=headers).json()["data"]
+    assert {item["name"] for item in listed} >= {"Demo Organization A", "Demo Organization B", "Organisation C"}
+    admin_list = client.get("/api/v1/organizations", headers=admin).json()["data"]
+    assert all(item["id"] != organization["id"] for item in admin_list)
+
+    duplicate = client.post("/api/v1/organizations", headers=headers, json={"name": "organisation c"})
+    assert duplicate.status_code == 409
+
+    member = client.post(
+        "/api/v1/members",
+        headers=headers,
+        json={
+            "user_key": "operateur-1",
+            "display_name": "Opérateur 1",
+            "memberships": [{"organization_id": organization["id"], "role": "operator"}],
+        },
+    )
+    assert member.status_code == 201

@@ -2,8 +2,16 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
-class MockConnector(ABC):
+class ConnectorError(Exception):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+class Connector(ABC):
     provider: str
+    simulated: bool = False
 
     @abstractmethod
     def health_check(self) -> dict[str, Any]: ...
@@ -18,3 +26,7 @@ class MockConnector(ABC):
 
     @abstractmethod
     def validate(self, event: dict[str, Any]) -> None: ...
+
+
+class MockConnector(Connector):
+    simulated = True
