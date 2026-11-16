@@ -4,6 +4,8 @@ const ALL: Role[] = ["super_admin", "security_admin", "soc_analyst", "operator",
 const INVESTIGATION: Role[] = ["super_admin", "security_admin", "soc_analyst"];
 const INCIDENTS: Role[] = ["super_admin", "security_admin", "soc_analyst", "operator"];
 const AUDIT: Role[] = ["super_admin", "security_admin", "auditor"];
+const MEMBERS: Role[] = ["super_admin", "security_admin"];
+const ORGANIZATIONS: Role[] = ["super_admin"];
 
 export const PAGE_ACCESS: { href: string; roles: Role[] }[] = [
   { href: "/dashboard", roles: ALL },
@@ -14,6 +16,8 @@ export const PAGE_ACCESS: { href: string; roles: Role[] }[] = [
   { href: "/policies", roles: INVESTIGATION },
   { href: "/approvals", roles: INVESTIGATION },
   { href: "/audit", roles: AUDIT },
+  { href: "/members", roles: MEMBERS },
+  { href: "/organizations", roles: ORGANIZATIONS },
 ];
 
 export function canOpen(role: Role | null | undefined, pathname: string): boolean {
@@ -28,4 +32,8 @@ export function canManageIncidents(role: Role | null | undefined): boolean {
 
 export function canExecuteResponse(role: Role | null | undefined): boolean {
   return role === "super_admin" || role === "security_admin" || role === "operator";
+}
+
+export function canManageMembers(role: Role | null | undefined): boolean {
+  return role === "super_admin" || role === "security_admin";
 }

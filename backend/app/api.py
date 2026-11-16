@@ -41,6 +41,9 @@ from app.schemas import (
     IncidentDTO,
     IncidentStatusChange,
     IntegrationCreate,
+    MemberCreate,
+    MemberRoleUpdate,
+    OrganizationCreate,
     MockLogin,
     PolicyCreate,
     PolicyDTO,
@@ -54,6 +57,9 @@ from app.services import (
     collect_integration,
     create_asset,
     create_integration,
+    change_member_role,
+    create_member,
+    create_organization,
     create_policy,
     decide_approval,
     dry_run_response,
@@ -61,13 +67,14 @@ from app.services import (
     execute_response,
     get_resource,
     incident_details,
+    list_members,
+    list_organizations,
     list_rows,
     login_demo_user,
     organization_details,
     propose_response,
     search_events,
     serialize,
-    tenant_organizations,
     update_asset,
     update_policy,
 )
@@ -170,7 +177,17 @@ def organizations(
     principal: Principal = Depends(get_principal),
     db: Session = Depends(default_get_db),
 ):
-    return success(request, [serialize(row) for row in tenant_organizations(db, principal.id)])
+    return success(request, [serialize(row) for row in list_organizations(db, principal)])
+
+
+@router.post("/organizations", status_code=201)
+def organization_create(
+    body: OrganizationCreate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: Session = Depends(default_get_db),
+):
+    return success(request, serialize(create_organization(db, principal, body.name)))
 
 
 @router.get("/organizations/{organization_id}")
@@ -181,6 +198,36 @@ def organization_detail(
     db: Session = Depends(default_get_db),
 ):
     return success(request, serialize(organization_details(db, principal.id, organization_id)))
+
+
+@router.get("/members")
+def members(
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: Session = Depends(default_get_db),
+):
+    return success(request, list_members(db, principal))
+
+
+@router.post("/members", status_code=201)
+def member_create(
+    body: MemberCreate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: Session = Depends(default_get_db),
+):
+    return success(request, create_member(db, principal, body))
+
+
+@router.patch("/members/{user_id}")
+def member_role(
+    user_id: UUID,
+    body: MemberRoleUpdate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+    db: Session = Depends(default_get_db),
+):
+    return success(request, change_member_role(db, principal, user_id, body))
 
 
 @router.get("/assets")

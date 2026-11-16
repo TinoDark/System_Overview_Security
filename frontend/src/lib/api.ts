@@ -9,6 +9,10 @@ import type {
   DashboardSummary,
   Incident,
   Integration,
+  MemberCreateInput,
+  MemberRoleUpdate,
+  Organization,
+  OrganizationMember,
   Policy,
   Principal,
   ResponseResult,
@@ -128,7 +132,18 @@ export const api = {
     );
   },
   me: () => request<Principal>("/auth/me", {}, false),
+  organizations: () => request<Organization[]>("/organizations", {}, false),
+  createOrganization: (name: string) =>
+    request<Organization>("/organizations", { method: "POST", body: JSON.stringify({ name }) }, false),
   logout: () => request<{ status: string }>("/auth/mock-logout", { method: "POST" }, false),
+  members: () => request<OrganizationMember[]>("/members", {}, false),
+  createMember: (body: MemberCreateInput) =>
+    request<OrganizationMember>("/members", { method: "POST", body: JSON.stringify(body) }, false),
+  updateMemberRole: (userId: string, body: MemberRoleUpdate) =>
+    request<OrganizationMember>(`/members/${encodeURIComponent(userId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }, false),
   summary: () => request<DashboardSummary>("/dashboard/summary"),
   timeline: () => request<Array<Record<string, unknown>>>("/dashboard/timeline"),
   events: async (filters: Record<string, string | number | undefined>) => {

@@ -46,7 +46,7 @@ export default function LoginPage() {
             <option value="analyst-a" /><option value="admin-a" /><option value="operator-a" /><option value="auditor-a" /><option value="observer-a" />
             <option value="analyst-b" /><option value="admin-b" /><option value="operator-b" /><option value="super-admin" />
           </datalist></div>
-          <span className="microcopy">Clés de démonstration listées dans le README backend.</span>
+          <span className="microcopy">Clés de démonstration, ou clé créée par un administrateur.</span>
           {errorText && <ErrorNotice>{errorText}</ErrorNotice>}
           {login.isError && <ErrorNotice>{login.error.message}</ErrorNotice>}
           <button className="button button-primary login-submit" disabled={login.isPending || !userKey.trim()}>{login.isPending ? "Connexion…" : "Se connecter"}<ArrowRight size={16} /></button>

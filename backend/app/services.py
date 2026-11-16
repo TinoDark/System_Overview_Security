@@ -1,5 +1,6 @@
 """Use-case layer. HTTP adapters call these services; no business rules live in routes."""
 
+import re
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -138,16 +139,44 @@ def fixture_seed(db: Session) -> None:
     db.commit()
 
 
+ADMIN_ROLES = frozenset({"security_admin", "super_admin"})
+# Highest rank first. A caller may grant their own rank and every rank below it.
+ROLE_LADDER = (
+    "super_admin",
+    "security_admin",
+    "soc_analyst",
+    "operator",
+    "auditor",
+    "observer",
+)
+
+
+def assignable_roles(caller_role: str) -> frozenset[str]:
+    try:
+        index = ROLE_LADDER.index(caller_role)
+    except ValueError:
+        return frozenset()
+    return frozenset(ROLE_LADDER[index:])
+
+
+def administered_organizations(principal) -> dict[UUID, str]:
+    return {
+        UUID(membership["organization_id"]): membership["role"]
+        for membership in principal.memberships
+        if membership["role"] in ADMIN_ROLES
+    }
+
+
 def login_demo_user(db: Session, user_key: str, enabled: bool, app_env: str) -> dict:
     if not enabled or app_env not in ("development", "test"):
         raise APIError(404, "NOT_FOUND", "Mock authentication is disabled")
-    if user_key not in MOCK_CATALOG:
-        raise APIError(401, "INVALID_DEMO_USER", "Unknown demo user")
     user = db.scalar(select(User).where(User.user_key == user_key, User.status == "active"))
     if user is None:
-        raise APIError(
-            503, "DEMO_FIXTURES_NOT_SEEDED", "Run the demo seed command before logging in"
-        )
+        if user_key in MOCK_CATALOG:
+            raise APIError(
+                503, "DEMO_FIXTURES_NOT_SEEDED", "Run the demo seed command before logging in"
+            )
+        raise APIError(401, "INVALID_DEMO_USER", "Unknown demo user")
     memberships = db.execute(
         select(Membership, Organization)
         .join(Organization, Organization.id == Membership.organization_id)
@@ -183,6 +212,10 @@ def login_demo_user(db: Session, user_key: str, enabled: bool, app_env: str) -> 
     }
 
 
+def is_super_admin(principal) -> bool:
+    return any(membership["role"] == "super_admin" for membership in principal.memberships)
+
+
 def tenant_organizations(db: Session, user_id: UUID) -> list[Organization]:
     return list(
         db.scalars(
@@ -192,6 +225,195 @@ def tenant_organizations(db: Session, user_id: UUID) -> list[Organization]:
             .order_by(Organization.name)
         )
     )
+
+
+def list_organizations(db: Session, principal) -> list[Organization]:
+    if is_super_admin(principal):
+        return list(
+            db.scalars(
+                select(Organization).where(Organization.status == "active").order_by(Organization.name)
+            )
+        )
+    return tenant_organizations(db, principal.id)
+
+
+def create_organization(db: Session, principal, name: str) -> Organization:
+    if not is_super_admin(principal):
+        raise APIError(403, "FORBIDDEN", "Role is not permitted for this operation")
+    cleaned = name.strip()
+    if db.scalar(select(Organization.id).where(func.lower(Organization.name) == cleaned.lower())) is not None:
+        raise APIError(409, "ORGANIZATION_EXISTS", "An organization with this name already exists")
+    base = re.sub(r"[^a-z0-9]+", "-", cleaned.lower()).strip("-")[:80] or "organisation"
+    slug = base
+    suffix = 2
+    while db.scalar(select(Organization.id).where(Organization.slug == slug)) is not None:
+        slug = f"{base[:70]}-{suffix}"
+        suffix += 1
+    organization = Organization(id=uuid4(), name=cleaned, slug=slug, status="active")
+    db.add(organization)
+    db.flush()
+    db.add(Membership(organization_id=organization.id, user_id=principal.id, role="super_admin"))
+    audit(
+        db,
+        TenantContext(organization.id, organization.name, "super_admin", principal),
+        principal.id,
+        "organization.created",
+        "organization",
+        organization.id,
+        metadata={"name": organization.name, "slug": organization.slug},
+    )
+    db.commit()
+    db.refresh(organization)
+    return organization
+
+
+def list_members(db: Session, principal) -> list[dict]:
+    scope = administered_organizations(principal)
+    if not scope:
+        raise APIError(403, "FORBIDDEN", "Role is not permitted for this operation")
+    rows = db.execute(
+        select(User, Membership, Organization)
+        .join(Membership, Membership.user_id == User.id)
+        .join(Organization, Organization.id == Membership.organization_id)
+        .where(
+            Membership.organization_id.in_(scope),
+            Organization.status == "active",
+            User.status == "active",
+        )
+        .order_by(User.display_name, Organization.name)
+    ).all()
+    grouped: dict[UUID, dict] = {}
+    for user, membership, organization in rows:
+        caller_role = scope.get(organization.id)
+        # A super administrator stays invisible to every lower role.
+        if caller_role is None or membership.role not in assignable_roles(caller_role):
+            continue
+        record = grouped.setdefault(
+            user.id,
+            {
+                "user_id": str(user.id),
+                "user_key": user.user_key,
+                "display_name": user.display_name,
+                "status": user.status,
+                "memberships": [],
+            },
+        )
+        record["memberships"].append(
+            {
+                "organization_id": str(organization.id),
+                "organization_name": organization.name,
+                "role": membership.role,
+            }
+        )
+    return [record for record in grouped.values() if record["memberships"]]
+
+
+def create_member(db: Session, principal, payload) -> dict:
+    scope = administered_organizations(principal)
+    if not scope:
+        raise APIError(403, "FORBIDDEN", "Role is not permitted for this operation")
+    if db.scalar(select(User.id).where(User.user_key == payload.user_key)) is not None:
+        raise APIError(409, "USER_EXISTS", "A user with this key already exists")
+    organizations = {
+        row.id: row
+        for row in db.scalars(
+            select(Organization).where(
+                Organization.id.in_([item.organization_id for item in payload.memberships]),
+                Organization.status == "active",
+            )
+        )
+    }
+    assignments = []
+    for item in payload.memberships:
+        caller_role = scope.get(item.organization_id)
+        organization = organizations.get(item.organization_id)
+        if caller_role is None or organization is None:
+            raise APIError(403, "ORGANIZATION_FORBIDDEN", "Organization membership is required")
+        if item.role not in assignable_roles(caller_role):
+            raise APIError(403, "FORBIDDEN", "Role is not permitted for this operation")
+        assignments.append((item, organization, caller_role))
+    user = User(
+        id=uuid4(),
+        user_key=payload.user_key,
+        display_name=payload.display_name,
+        status="active",
+    )
+    db.add(user)
+    db.flush()
+    memberships = []
+    for item, organization, caller_role in assignments:
+        db.add(Membership(organization_id=organization.id, user_id=user.id, role=item.role))
+        audit(
+            db,
+            TenantContext(organization.id, organization.name, caller_role, principal),
+            principal.id,
+            "member.created",
+            "user",
+            user.id,
+            metadata={"user_key": user.user_key, "role": item.role},
+        )
+        memberships.append(
+            {
+                "organization_id": str(organization.id),
+                "organization_name": organization.name,
+                "role": item.role,
+            }
+        )
+    db.commit()
+    return {
+        "user_id": str(user.id),
+        "user_key": user.user_key,
+        "display_name": user.display_name,
+        "status": user.status,
+        "memberships": memberships,
+    }
+
+
+def change_member_role(db: Session, principal, user_id: UUID, payload) -> dict:
+    """Replace a member's role in one organization. Promotion moves them up the ladder."""
+    scope = administered_organizations(principal)
+    caller_role = scope.get(payload.organization_id)
+    if caller_role is None:
+        raise APIError(403, "ORGANIZATION_FORBIDDEN", "Organization membership is required")
+    if user_id == principal.id:
+        raise APIError(403, "FORBIDDEN", "Role is not permitted for this operation")
+    if payload.role not in assignable_roles(caller_role):
+        raise APIError(403, "FORBIDDEN", "Role is not permitted for this operation")
+    membership = db.get(Membership, (payload.organization_id, user_id))
+    organization = db.get(Organization, payload.organization_id)
+    user = db.get(User, user_id)
+    hidden = (
+        membership is None
+        or organization is None
+        or organization.status != "active"
+        or user is None
+        or user.status != "active"
+        or membership.role not in assignable_roles(caller_role)
+    )
+    if hidden:
+        raise APIError(404, "NOT_FOUND", "Member not found")
+    if membership.role == "super_admin":
+        raise APIError(403, "FORBIDDEN", "Role is not permitted for this operation")
+    previous = membership.role
+    if previous != payload.role:
+        membership.role = payload.role
+        audit(
+            db,
+            TenantContext(organization.id, organization.name, caller_role, principal),
+            principal.id,
+            "member.role_changed",
+            "user",
+            user.id,
+            metadata={"user_key": user.user_key, "from_role": previous, "role": payload.role},
+        )
+        db.commit()
+    visible = next(
+        (row for row in list_members(db, principal) if row["user_id"] == str(user.id)),
+        None,
+    )
+    if visible is None:
+        raise APIError(404, "NOT_FOUND", "Member not found")
+    return visible
 
 
 def organization_details(db: Session, user_id: UUID, organization_id: UUID) -> Organization:

@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Activity, AlertTriangle, Boxes, ChevronDown, ClipboardCheck, FileClock,
-  FileText, LayoutDashboard, LogOut, Menu, Network, Search, Shield,
+  Activity, AlertTriangle, Boxes, Building2, ChevronDown, ClipboardCheck, FileClock,
+  FileText, LayoutDashboard, LogOut, Menu, Network, Search, Shield, Users,
   ShieldAlert, X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -52,6 +52,8 @@ const navigation = [
   { label: "Politiques", href: "/policies", icon: FileText },
   { label: "Approbations", href: "/approvals", icon: ClipboardCheck },
   { label: "Audit", href: "/audit", icon: FileClock },
+  { label: "Membres", href: "/members", icon: Users },
+  { label: "Organisations", href: "/organizations", icon: Building2 },
 ];
 
 export function PortalShell({ children }: { children: React.ReactNode }) {

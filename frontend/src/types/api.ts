@@ -20,6 +20,33 @@ export interface Principal {
   permissions?: string[];
 }
 
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  created_at?: string;
+}
+
+export interface OrganizationMember {
+  user_id: string;
+  user_key: string;
+  display_name: string;
+  status: string;
+  memberships: Array<Pick<Membership, "organization_id" | "organization_name" | "role">>;
+}
+
+export interface MemberCreateInput {
+  user_key: string;
+  display_name: string;
+  memberships: Array<{ organization_id: string; role: Role }>;
+}
+
+export interface MemberRoleUpdate {
+  organization_id: string;
+  role: Role;
+}
+
 export interface ApiMeta {
   request_id?: string;
   next_cursor?: string | null;
